@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UPLINK // SECURE SHELL</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        :root {
+            --term-green: #33ff00;
+            --term-dim: #1a8000;
+            --term-bg: #0a0a0a;
+            --alert: #ff3333;
+            --font-stack: 'Courier New', 'Lucida Console', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: var(--term-bg);
+            color: var(--term-green);
+            font-family: var(--font-stack);
+            height: 100vh;
+            overflow: hidden;
+            text-shadow: 0 0 4px rgba(51, 255, 0, 0.5);
+            font-size: 14px;
+        }
+
+        /* --- CRT EFFECT --- */
+        .scanlines {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+            z-index: 999;
+            opacity: 0.6;
+        }
+
+        .flicker { animation: flicker 0.35s infinite; pointer-events: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(51,255,0,0.02); z-index:998; }
+
+        /* --- TERMINAL LAYOUT --- */
+        #terminal {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            padding: 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 10;
+        }
+
+        /* HEADER */
+        .header {
+            border-bottom: 2px solid var(--term-green);
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+            display: flex; justify-content: space-between;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .status-badge { background: var(--term-green); color: black; padding: 2px 5px; }
+        .status-offline { background: var(--alert); color: black; }
+
+        /* LOG AREA */
+        #console-output {
+            flex-grow: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding-right: 10px;
+            scrollbar-width: none; /* Firefox */
+        }
+        #console-output::-webkit-scrollbar { display: none; } /* Chrome */
+
+        /* MESSAGES */
+        .line { display: flex; gap: 10px; animation: textGlitch 0.05s; }
+        .ts { color: var(--term-dim); min-width: 80px; }
+        .user { font-weight: bold; }
+        .sys { color: var(--secondary); font-style: italic; opacity: 0.7; }
+        .msg-text { word-break: break-all; }
+
+        /* INPUT AREA */
+        .input-line {
+            display: flex;
+            align-items: center;
+            border-top: 1px solid var(--term-dim);
+            padding-top: 10px;
+            margin-top: 10px;
+            background: var(--term-bg);
+        }
+        
+        .prompt { margin-right: 10px; font-weight: bold; }
+        
+        input {
+            flex-grow: 1;
+            background: transparent;
+            border: none;
+            color: var(--term-green);
+            font-family: var(--font-stack);
+            font-size: 1rem;
+            outline: none;
+            caret-color: var(--term-green);
+        }
+
+        /* --- LOGIN OVERLAY --- */
+        #auth-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--term-bg);
+            z-index: 100;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+        }
+        .auth-box { width: 300px; text-align: left; }
+        .blink-cursor::after { content: '█'; animation: blink 1s infinite; margin-left: 2px; }
+        
+        button { display: none; } /* We use Enter key only for hacker feel */
+
+        /* --- ANIMATIONS --- */
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes flicker { 0% { opacity: 0.9; } 50% { opacity: 1.0; } 100% { opacity: 0.9; } }
+        @keyframes textGlitch { 0% { transform: translateX(2px); } 100% { transform: translateX(0); } }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <div class="scanlines"></div>
+    <div class="flicker"></div>
+
+    <div id="auth-layer">
+        <div class="auth-box">
+            <pre style="font-size: 0.6rem; margin-bottom: 20px; line-height: 10px;">
+  _   _  ____  _      ___  _   _  _  __
+ | | | ||  _ \| |    |_ _|| \ | || |/ /
+ | | | || |_) | |     | | |  \| || ' / 
+ | |_| ||  __/| |___  | | | |\  || . \ 
+  \___/ |_|   |_____||___||_| \_||_|\_\
+            </pre>
+            <p>> INITIALIZING SECURE HANDSHAKE...</p>
+            <br>
+            <p>ENTER CODENAME:</p>
+            <div style="display:flex;">
+                <span>></span>
+                <input type="text" id="auth-user" autofocus onkeydown="handleAuth(event)">
+            </div>
+            <br>
+            <div id="freq-section" class="hidden">
+                <p>ENTER CHANNEL FREQ (KEY):</p>
+                <div style="display:flex;">
+                    <span>></span>
+                    <input type="text" id="auth-freq" onkeydown="handleConnect(event)">
+                </div>
+            </div>
+            <p id="auth-status" style="margin-top:20px; color:var(--term-dim);"></p>
+        </div>
+    </div>
+
+    <div id="terminal" class="hidden">
+        <div class="header">
+            <span>UPLINK v2.0 (By Taki Zaidi) <span style="font-size:0.7em; color:var(--term-dim);">// ENCRYPTED</span></span>
+            <span id="net-stat" class="status-badge status-offline">OFFLINE</span>
+        </div>
+
+        <div id="console-output">
+            </div>
+
+        <div class="input-line">
+            <span class="prompt" id="prompt-user">GHOST@UPLINK:~$</span>
+            <input type="text" id="cmd-input" autocomplete="off" onkeydown="handleCommand(event)">
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // Using HiveMQ Public Broker (WSS Support is reliable)
+        const BROKER = 'wss://broker.hivemq.com:8884/mqtt';
+        const APP_ID = 'uplink_v2_'; // Namespace to prevent collisions
+        
+        let client;
+        let username = '';
+        let channel = '';
+        let isConnected = false;
+
+        // --- AUTH LOGIC ---
+        function handleAuth(e) {
+            if (e.key === 'Enter') {
+                const val = e.target.value.trim();
+                if (val.length > 0) {
+                    username = val.toUpperCase();
+                    e.target.disabled = true;
+                    document.getElementById('freq-section').classList.remove('hidden');
+                    document.getElementById('auth-freq').focus();
+                }
+            }
+        }
+
+        function handleConnect(e) {
+            if (e.key === 'Enter') {
+                const val = e.target.value.trim();
+                if (val.length > 0) {
+                    channel = APP_ID + val; // e.g. uplink_v2_mySecretChannel
+                    e.target.disabled = true;
+                    document.getElementById('auth-status').innerText = "> ESTABLISHING UPLINK...";
+                    initSystem();
+                }
+            }
+        }
+
+        // --- SYSTEM INIT ---
+        function initSystem() {
+            // Switch UI
+            setTimeout(() => {
+                document.getElementById('auth-layer').classList.add('hidden');
+                document.getElementById('terminal').classList.remove('hidden');
+                document.getElementById('prompt-user').innerText = `${username}@UPLINK:~$`;
+                document.getElementById('cmd-input').focus();
+                
+                printLog("SYSTEM", "INITIALIZING NETWORK PROTOCOLS...");
+                connectMQTT();
+            }, 1000);
+        }
+
+        // --- MQTT CONNECTION ---
+        function connectMQTT() {
+            const clientId = 'uplink_user_' + Math.random().toString(16).substr(2, 8);
+            
+            client = mqtt.connect(BROKER, {
+                keepalive: 60,
+                clientId: clientId,
+                protocolId: 'MQTT',
+                protocolVersion: 4,
+                clean: true,
+                reconnectPeriod: 1000,
+                connectTimeout: 30 * 1000,
+            });
+
+            client.on('connect', () => {
+                isConnected = true;
+                updateStatus(true);
+                printLog("SYSTEM", "CONNECTION SECURE. HANDSHAKE COMPLETE.");
+                
+                // Subscribe to channel
+                client.subscribe(channel, { qos: 0 }, (err) => {
+                    if (!err) {
+                        printLog("SYSTEM", `JOINED FREQUENCY: [${channel.replace(APP_ID, '')}]`);
+                        publishPayload("SYSTEM", `${username} HAS CONNECTED.`);
+                    }
+                });
+            });
+
+            client.on('message', (topic, message) => {
+                if (topic === channel) {
+                    try {
+                        const payload = JSON.parse(message.toString());
+                        // Don't show my own messages if I sent them (prevents double logging)
+                        // EXCEPT for system messages
+                        if (payload.sender !== username) {
+                            printLog(payload.sender, payload.text);
+                        }
+                    } catch (e) {
+                        console.error("Decryption Fail");
+                    }
+                }
+            });
+
+            client.on('offline', () => updateStatus(false));
+            client.on('reconnect', () => printLog("SYSTEM", "ATTEMPTING RECONNECT..."));
+            client.on('error', (err) => {
+                printLog("ERROR", "NETWORK FAILURE: " + err);
+                updateStatus(false);
+            });
+        }
+
+        // --- MESSAGING ---
+        function handleCommand(e) {
+            if (e.key === 'Enter') {
+                const input = e.target;
+                const text = input.value.trim();
+                
+                if (text) {
+                    if (text.startsWith('/')) {
+                        handleSlashCommand(text);
+                    } else {
+                        sendMessage(text);
+                    }
+                }
+                input.value = '';
+            }
+        }
+
+        function sendMessage(text) {
+            if (!isConnected) {
+                printLog("ERROR", "NO UPLINK SIGNAL.");
+                return;
+            }
+            // 1. Show locally immediately (Optimistic UI)
+            printLog(username, text);
+            // 2. Send to network
+            publishPayload(username, text);
+        }
+
+        function publishPayload(sender, text) {
+            const payload = JSON.stringify({
+                sender: sender,
+                text: text,
+                ts: Date.now()
+            });
+            client.publish(channel, payload);
+        }
+
+        function handleSlashCommand(cmd) {
+            if (cmd === '/clear') {
+                document.getElementById('console-output').innerHTML = '';
+            } else if (cmd === '/whoami') {
+                printLog("SYSTEM", `USER: ${username} | CHANNEL: ${channel.replace(APP_ID, '')}`);
+            } else {
+                printLog("SYSTEM", "UNKNOWN COMMAND.");
+            }
+        }
+
+        // --- UI UTILS ---
+        function printLog(sender, text) {
+            const container = document.getElementById('console-output');
+            const div = document.createElement('div');
+            div.className = 'line';
+            
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" });
+            
+            // Color coding based on sender
+            let userClass = 'user';
+            let senderDisplay = sender;
+            
+            if (sender === 'SYSTEM') {
+                userClass = 'sys';
+                senderDisplay = '>> SYSTEM';
+            } else if (sender === 'ERROR') {
+                userClass = 'status-offline'; // Red bg
+            }
+
+            div.innerHTML = `
+                <span class="ts">[${time}]</span>
+                <span class="${userClass}">${senderDisplay}:</span>
+                <span class="msg-text">${text}</span>
+            `;
+
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateStatus(online) {
+            const el = document.getElementById('net-stat');
+            if (online) {
+                el.innerText = "ONLINE";
+                el.className = "status-badge";
+                el.style.background = "var(--term-green)";
+            } else {
+                el.innerText = "OFFLINE";
+                el.className = "status-badge status-offline";
+            }
+        }
+
+        // Auto focus input if clicked anywhere
+        document.body.onclick = () => {
+            if (!document.getElementById('terminal').classList.contains('hidden')) {
+                document.getElementById('cmd-input').focus();
+            }
+        };
+
+    </script>
+</body>
+</html>
