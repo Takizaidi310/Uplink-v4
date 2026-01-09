@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UPLINK // SECURE SHELL</title>
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         :root {
             --term-green: #33ff00;
@@ -79,7 +79,7 @@
         .line { display: flex; gap: 10px; animation: textGlitch 0.05s; }
         .ts { color: var(--term-dim); min-width: 80px; }
         .user { font-weight: bold; }
-        .sys { color: var(--term-green); font-style: italic; opacity: 0.7; }
+        .sys { color: #00ffff; font-style: italic; opacity: 0.8; }
         .msg-text { word-break: break-all; }
 
         /* INPUT AREA */
@@ -114,12 +114,10 @@
             justify-content: center; align-items: center;
         }
         .auth-box { width: 300px; text-align: left; }
-        .blink-cursor::after { content: '█'; animation: blink 1s infinite; margin-left: 2px; }
         
-        button { display: none; } /* We use Enter key only for hacker feel */
+        button { display: none; } 
 
         /* --- ANIMATIONS --- */
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
         @keyframes flicker { 0% { opacity: 0.9; } 50% { opacity: 1.0; } 100% { opacity: 0.9; } }
         @keyframes textGlitch { 0% { transform: translateX(2px); } 100% { transform: translateX(0); } }
 
@@ -161,7 +159,7 @@
 
     <div id="terminal" class="hidden">
         <div class="header">
-            <span>UPLINK v2.0 <span style="font-size:0.7em; color:var(--term-dim);">// (SOCKET SECURE) MADE BY TAKI ZAIDI</span></span>
+            <span>UPLINK v2.1 (SECURE) <span style="font-size:0.7em; color:var(--term-dim);">// ENCRYPTED</span></span>
             <span id="net-stat" class="status-badge status-offline">OFFLINE</span>
         </div>
 
@@ -176,6 +174,11 @@
 
     <script>
         // --- CONFIGURATION ---
+        
+        // IMPORTANT: REPLACE THIS URL WITH YOUR DEPLOYED BACKEND URL (e.g., https://uplink-backend.onrender.com)
+        // For local testing, use 'http://localhost:3001'
+        const BACKEND_URL = 'https://uplink-v2-rydo.vercel.app/'; 
+        
         let socket;
         let username = '';
         let channel = '';
@@ -198,7 +201,7 @@
             if (e.key === 'Enter') {
                 const val = e.target.value.trim();
                 if (val.length > 0) {
-                    channel = val; // The room name
+                    channel = val; 
                     e.target.disabled = true;
                     document.getElementById('auth-status').innerText = "> ESTABLISHING UPLINK...";
                     initSystem();
@@ -219,33 +222,39 @@
             }, 1000);
         }
 
-        // --- SOCKET CONNECTION (BACKEND INTEGRATION) ---
+        // --- SOCKET CONNECTION ---
         function connectSocket() {
-            // Connect to the backend
-            socket = io();
+            // Initialize Socket.io
+            socket = io(BACKEND_URL, {
+                reconnection: true,
+                reconnectionAttempts: 5
+            });
 
             socket.on('connect', () => {
                 isConnected = true;
                 updateStatus(true);
                 printLog("SYSTEM", "CONNECTION SECURE. HANDSHAKE COMPLETE.");
                 
-                // Join the specific room (frequency)
-                socket.emit('join_frequency', { username, channel });
+                // Join the specific channel
+                socket.emit('join_channel', { username, channel });
+                printLog("SYSTEM", `JOINED FREQUENCY: [${channel}]`);
             });
 
-            // Listen for incoming messages from the server
-            socket.on('network_log', (data) => {
+            socket.on('receive_message', (data) => {
+                // We display all messages received from server
                 printLog(data.sender, data.text);
             });
 
             socket.on('disconnect', () => {
+                isConnected = false;
                 updateStatus(false);
-                printLog("ERROR", "CARRIER SIGNAL LOST.");
+                printLog("ERROR", "CONNECTION SEVERED.");
             });
-            
+
             socket.on('connect_error', (err) => {
-                printLog("ERROR", "NETWORK FAILURE: " + err);
-                updateStatus(false);
+                console.error("Connection Error:", err);
+                // Only log if we aren't already offline to prevent spam
+                if(isConnected) printLog("ERROR", "NETWORK UNREACHABLE.");
             });
         }
 
@@ -268,15 +277,15 @@
 
         function sendMessage(text) {
             if (!isConnected) {
-                printLog("ERROR", "NO UPLINK SIGNAL.");
+                printLog("ERROR", "NO UPLINK SIGNAL. CANNOT TRANSMIT.");
                 return;
             }
-            
-            // Send payload to backend
-            socket.emit('payload', {
-                sender: username,
+            // Send to server
+            socket.emit('send_message', {
                 channel: channel,
-                text: text
+                sender: username,
+                text: text,
+                ts: Date.now()
             });
         }
 
@@ -284,7 +293,7 @@
             if (cmd === '/clear') {
                 document.getElementById('console-output').innerHTML = '';
             } else if (cmd === '/whoami') {
-                printLog("SYSTEM", `USER: ${username} | FREQ: ${channel}`);
+                printLog("SYSTEM", `USER: ${username} | CHANNEL: ${channel}`);
             } else {
                 printLog("SYSTEM", "UNKNOWN COMMAND.");
             }
@@ -306,6 +315,7 @@
                 senderDisplay = '>> SYSTEM';
             } else if (sender === 'ERROR') {
                 userClass = 'status-offline'; 
+                senderDisplay = '!! ERROR';
             }
 
             div.innerHTML = `
@@ -330,13 +340,12 @@
             }
         }
 
+        // Auto focus input
         document.body.onclick = () => {
             if (!document.getElementById('terminal').classList.contains('hidden')) {
                 document.getElementById('cmd-input').focus();
             }
         };
-
     </script>
 </body>
 </html>
-
