@@ -30,6 +30,8 @@ To establish a secure uplink, follow these instructions precisely:
 The terminal supports internal commands to manage your session:
 * `/whoami` — Displays your current codename and the frequency you are tuned to.
 * `/clear` — Wipes the console log of all previous messages.
+* `/mute` — mutes the voice command.
+* `/unmute` — unmutes the voice command.
 
 ## **TECHNICAL SPECIFICATIONS**
 
