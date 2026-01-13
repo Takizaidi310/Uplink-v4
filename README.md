@@ -3,8 +3,7 @@
 
 UPLINK v4 is a zero-latency, browser-based secure communication suite designed for operatives requiring high-privacy text, file, and multimedia exchange. It utilizes a decentralized **WebRTC Mesh Topology** and **AES-256 GCM Encryption** to ensure that data remains strictly between participants.
 
-![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Version](https://img.shields.io/badge/Version-4.1.0--Omega-33ff00)
+![Version](https://img.shields.io/badge/Version-4.0--Omega-33ff00)
 ![Security](https://img.shields.io/badge/Encryption-AES--256--GCM-success)
 
 ---
@@ -80,12 +79,6 @@ Contributions are welcome to the OMEGA Protocol. Please feel free to submit Pull
 * Improved WebRTC stability.
 * Additional `/commands`.
 * Enhanced CRT/Shader effects.
-
----
-
-## 📜 License
-
-Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
 
